@@ -1,4 +1,4 @@
-"""Shared helpers used by every translator.
+r"""Shared helpers used by every translator.
 
 Three concerns live here:
   1. Question-body HTML extraction (drop QTI interactions, keep XHTML).
@@ -14,8 +14,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from ..parser import AssessmentItem, NS, _local, _serialise_children
-
+from ..parser import AssessmentItem, _local, _serialise_children
 
 # ---------------------------------------------------------------------------
 # (1) Body HTML extraction

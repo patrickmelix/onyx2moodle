@@ -15,16 +15,33 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Education",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Education",
+  "Topic :: Text Processing :: Markup :: XML",
 ]
 dependencies = [
   "lxml>=4.9",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov"]
+dev = [
+  "pytest>=7",
+  "pytest-cov",
+  "ruff>=0.5",
+  "build",
+  "twine",
+]
+
+[project.urls]
+Homepage = "https://github.com/patrickmelix/onyx2moodle"
+Repository = "https://github.com/patrickmelix/onyx2moodle"
+Issues = "https://github.com/patrickmelix/onyx2moodle/issues"
+Changelog = "https://github.com/patrickmelix/onyx2moodle/releases"
 
 [project.scripts]
 onyx2moodle = "onyx2moodle.cli:main"
@@ -38,3 +55,17 @@ onyx2moodle = ["templates/*.xml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Sensible baseline; expand later if needed.
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+  "E501",  # line length handled by formatter, not blocker for docs/comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]

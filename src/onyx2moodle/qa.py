@@ -22,7 +22,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _STACK_QUESTION_RE = re.compile(
     r'<question type="stack">.*?</question>', re.DOTALL
 )

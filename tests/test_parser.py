@@ -5,7 +5,6 @@ from pathlib import Path
 
 from onyx2moodle.parser import parse_item
 
-
 CHOICE_ITEM = """<?xml version="1.0" encoding="UTF-8"?>
 <assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p1"
                 identifier="ix" title="Test Choice" adaptive="false" timeDependent="false">

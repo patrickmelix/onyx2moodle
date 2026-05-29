@@ -8,7 +8,6 @@ from onyx2moodle.parser import parse_item
 
 from .test_parser import CHOICE_ITEM, STACK_ITEM
 
-
 PRINTED_VAR_ITEM = """<?xml version="1.0" encoding="UTF-8"?>
 <assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p1"
                 identifier="ix" title="Variant" adaptive="false" timeDependent="false">

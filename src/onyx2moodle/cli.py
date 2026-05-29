@@ -103,10 +103,10 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     convertible = sum(1 for r in rows if r.get("convertible"))
     print(f"\nInventory: {args.archive.name}  ({n} items)")
     print(f"  Convertible automatically: {convertible} ({100*convertible//max(1,n)}%)")
-    print(f"\n  Target distribution:")
+    print("\n  Target distribution:")
     for target, count in targets.most_common():
         print(f"    {target:14s} {count:4d}")
-    print(f"\n  Manual / deferred items (top 10 reasons):")
+    print("\n  Manual / deferred items (top 10 reasons):")
     deferred_reasons = Counter(
         r.get("reason", "") for r in rows if not r.get("convertible") and r["target"] != "error"
     )

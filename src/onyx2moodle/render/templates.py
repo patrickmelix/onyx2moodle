@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # Templates ship alongside the package; this resolves to .../onyx2moodle/templates/
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 

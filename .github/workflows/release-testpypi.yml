@@ -1,0 +1,79 @@
+name: Release to TestPyPI
+
+# Manual workflow for shipping release candidates to test.pypi.org.
+# Useful for verifying a build end-to-end (twine check, install from
+# TestPyPI, smoke-test the wheel) before tagging the real PyPI release.
+#
+# ONE-TIME SETUP REQUIRED on test.pypi.org:
+#   1. Project owner: log in to https://test.pypi.org/manage/account/publishing/
+#   2. Add a new "pending publisher" with:
+#        PyPI Project Name: onyx2moodle
+#        Owner:             patrickmelix
+#        Repository name:   onyx2moodle
+#        Workflow name:     release-testpypi.yml
+#        Environment name:  testpypi
+#   3. Create a GitHub environment named `testpypi`
+#      (Settings → Environments → New environment).
+#
+# To run:
+#   1. (Optional) bump pyproject.toml version to a pre-release tag like
+#      "0.2.0rc1" or "0.2.0.dev1". TestPyPI does not enforce uniqueness as
+#      strictly as PyPI but uploads still fail on exact-version collision.
+#   2. Actions → Release to TestPyPI → Run workflow → pick branch/ref.
+#
+# To install from TestPyPI afterwards:
+#   pip install --index-url https://test.pypi.org/simple/ \
+#               --extra-index-url https://pypi.org/simple/ \
+#               onyx2moodle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Check built distributions
+        run: |
+          python -m pip install twine
+          python -m twine check dist/*
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/onyx2moodle/
+    permissions:
+      id-token: write  # required for trusted publishing via OIDC
+
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

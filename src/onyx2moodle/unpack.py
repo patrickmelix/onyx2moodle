@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 
-
 _SLUG_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 

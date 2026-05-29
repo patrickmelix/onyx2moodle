@@ -15,7 +15,6 @@ from onyx2moodle.classifier import classify
 from onyx2moodle.parser import parse_item
 from onyx2moodle.translate import cloze, matching
 
-
 MATCH_ITEM = """<?xml version="1.0" encoding="UTF-8"?>
 <assessmentItem xmlns="http://www.imsglobal.org/xsd/imsqti_v2p1"
                 identifier="ix" title="Test Match" adaptive="false" timeDependent="false">

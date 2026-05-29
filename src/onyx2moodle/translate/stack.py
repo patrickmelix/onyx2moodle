@@ -22,7 +22,6 @@ from .common import (
     extract_question_html,
 )
 
-
 STACK_VERSION = "2024111900"   # matches the skill's lhopital example
 
 
@@ -84,13 +83,12 @@ def _input_spec_for(
     # response declaration is float, use NumAbsolute and forbid float-rounding
     # surprises.
     is_pure_number = bool(re.fullmatch(r"-?\d+(\.\d+)?", tans_expr))
-    is_set_or_list = tans_expr.startswith(("{", "["))
     answertest = "AlgEquiv"
     forbidfloat = 1
     if is_pure_number and rdecl and rdecl.base_type == "float":
         answertest = "NumAbsolute"
         forbidfloat = 0
-    # Sets need AlgEquiv too — STACK handles `{...}` equality.
+    # Sets / lists pass through with AlgEquiv — STACK handles `{...}` and `[...]` equality.
 
     boxsize = max(8, (interaction.expected_length or 15))
     syntaxhint = interaction.placeholder or ""
@@ -219,7 +217,7 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
     # questiontext: replace each textEntry by [[input:ansN]] [[validation:ansN]]
     replacements = {
         ix.response_identifier: f"[[input:{spec.name}]] [[validation:{spec.name}]]"
-        for ix, spec in zip(text_entries, specs)
+        for ix, spec in zip(text_entries, specs, strict=True)
     }
     body_html = extract_question_html(item, replacements)
     body_html, image_files = embed_images_as_base64(body_html, assets)
@@ -296,7 +294,6 @@ def _split_feedback(item: AssessmentItem) -> tuple[str, str]:
     incorrect_html = ""
     for fb in item.feedback:
         title_lower = (fb.title or "").lower()
-        body_lower = fb.html.lower()
         looks_correct = (
             "richtig" in title_lower or "korrekt" in title_lower
             or "sehr gut" in title_lower or "perfekt" in title_lower

@@ -25,8 +25,7 @@ from dataclasses import dataclass
 
 from lxml import etree
 
-from .parser import NS, AssessmentItem, Interaction
-
+from .parser import NS, AssessmentItem
 
 AUTOMATIC_TARGETS = {
     "stack",

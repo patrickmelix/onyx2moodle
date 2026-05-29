@@ -5,8 +5,6 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-import pytest
-
 from onyx2moodle.unpack import unpack_archive
 
 

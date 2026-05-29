@@ -15,7 +15,6 @@ from pathlib import Path
 
 from lxml import etree
 
-
 QTI_NS = "http://www.imsglobal.org/xsd/imsqti_v2p1"
 XHTML_NS = "http://www.w3.org/1999/xhtml"
 MATHML_NS = "http://www.w3.org/1998/Math/MathML"
