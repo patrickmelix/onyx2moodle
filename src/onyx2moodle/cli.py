@@ -21,7 +21,7 @@ from . import __version__
 from .classifier import classify
 from .emitter import emit_bundle
 from .parser import parse_item
-from .qa import find_validator, validate_bundle
+from .qa import find_validator, lint_stack_maxima, validate_bundle
 from .translate import cloze, essay, matching, multichoice, shortanswer, stack
 from .unpack import unpack_archive
 
@@ -167,12 +167,19 @@ def cmd_convert(args: argparse.Namespace) -> int:
         print(f"  -> details in {skip_log}")
 
     if args.validate:
+        # Built-in STACK Maxima lint: catches sandbox pitfalls (load(), random,
+        # bare combinatorics calls, String testoptions misuse) that pass the
+        # structural validator but fail at Moodle import.
+        lint = lint_stack_maxima(out_path)
+        print()
+        print(lint.summary())
+
         validator = find_validator()
         if validator is None:
-            print("WARN: --validate requested but no validator found "
-                  "(set ONYX2MOODLE_VALIDATOR or put validate.py on PATH)")
-            return 0
-        print(f"\nRunning validator: {validator}")
+            print("\nWARN: structural validator not found "
+                  "(set ONYX2MOODLE_VALIDATOR or put validate.py on PATH); skipping.")
+            return 1 if not lint.ok else 0
+        print(f"\nRunning structural validator: {validator}")
         results = validate_bundle(out_path, validator)
         passed = sum(1 for r in results if r.passed)
         warns = sum(r.warnings for r in results)
@@ -183,6 +190,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
             for r in [r for r in results if not r.passed][:5]:
                 print(f"\n--- {r.question_name} ---")
                 print(r.output)
+        return 1 if (errs or not lint.ok) else 0
     return 0
 
 
