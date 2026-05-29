@@ -11,6 +11,7 @@ from pathlib import Path
 
 from onyx2moodle.qa import lint_stack_maxima
 
+
 # A minimal STACK question shell with replaceable questionvariables / nodes.
 # The lint walks the actual XML structure, so we keep this realistic enough
 # that the regex patterns find the right blocks.
