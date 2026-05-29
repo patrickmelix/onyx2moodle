@@ -15,6 +15,15 @@ Routing table:
     MAXIMAGRAPHIC                    -> manual           (plot-grading)
     templateConstraint retry loops   -> manual           (complex randomisation)
 
+Variant metadata (`<printedVariable>` in the body, `$(N)` template refs)
+matters **only for textEntry** items, because the teacher answer itself is
+randomised there and a static AlgEquiv template can't capture it. For
+non-textEntry items the metadata only affects display labels — the
+identifier-based correctResponse remains stable, so the structural
+translator handles them fine. This is the lesson from items like
+`Permutationen_Anwendung_I` (matchInteraction + printedVariable labels)
+which were previously mis-deferred to manual.
+
 Items routed to `"manual"` are flagged in the coverage report so they can
 be re-authored by hand. `"unknown"` means we couldn't classify the item;
 surface it instead of guessing.
@@ -45,6 +54,25 @@ class Classification:
     convertible: bool     # True if a translator can handle this mechanically
 
 
+def _has_variant_metadata(item: AssessmentItem) -> bool:
+    """True if the item uses `<printedVariable>` in its body OR a
+    `VARIABLESTRING` template binding with a `$(N)` indexed reference.
+
+    For textEntry items this means the teacher answer is randomised and we
+    can't mechanically translate. For other interaction kinds it only
+    randomises display labels — the translator still works.
+    """
+    has_printed_variable = bool(etree.fromstring(item.raw_xml).xpath(
+        ".//q:printedVariable", namespaces=NS,
+    ))
+    has_indexed_ref = any(
+        b.custom_op == "VARIABLESTRING"
+        and (b.value or "").strip().startswith("$(")
+        for b in item.template_bindings
+    )
+    return has_printed_variable or has_indexed_ref
+
+
 def classify(item: AssessmentItem) -> Classification:
     kinds = [i.kind for i in item.interactions]
     has_maxima = item.has_maxima_grading()
@@ -55,56 +83,8 @@ def classify(item: AssessmentItem) -> Classification:
     if has_graphic:
         return Classification("manual", "MAXIMAGRAPHIC grading not supported", "high", False)
 
-    # Variant randomisation marker: <printedVariable> in body OR templateBindings
-    # whose VARIABLESTRING value uses an indexed `$(N)` reference (which means
-    # the teacher answer is a child <variable> bound by templateProcessing —
-    # i.e. there's non-trivial Maxima script we cannot translate mechanically).
-    has_printed_variable = bool(etree.fromstring(item.raw_xml).xpath(
-        ".//q:printedVariable", namespaces=NS,
-    ))
-    has_indexed_ref = any(
-        b.custom_op == "VARIABLESTRING"
-        and (b.value or "").strip().startswith("$(")
-        for b in item.template_bindings
-    )
-    if has_printed_variable or has_indexed_ref:
-        return Classification(
-            "manual",
-            "uses ONYX template variants (printedVariable / $(N) reference) — needs manual rewrite",
-            "high", False,
-        )
-
-    # All-textEntry questions
-    if kinds and all(k == "textEntry" for k in kinds):
-        # Distinguish maxima-formula style from plain string
-        is_maxima_style = any(
-            "maxima" in (i.css_class or "").lower() for i in item.interactions
-        ) or has_maxima
-        if is_maxima_style:
-            # Inspect templateProcessing complexity. We treat *any* template
-            # binding using customOperator MAXIMA (instead of VARIABLESTRING)
-            # as "complex randomisation" and defer it.
-            complex_template = any(
-                b.custom_op == "MAXIMA" for b in item.template_bindings
-            )
-            if complex_template:
-                return Classification(
-                    "manual",
-                    "STACK with Maxima-script template processing (deferred)",
-                    "medium", False,
-                )
-            return Classification(
-                "stack",
-                f"textEntry x{len(kinds)} with MAXIMA grading"
-                + (f" + {len(item.template_bindings)} template bindings" if has_template else ""),
-                "high", True,
-            )
-        else:
-            return Classification(
-                "shortanswer",
-                f"textEntry x{len(kinds)}, plain string mapping",
-                "high", True,
-            )
+    # ----- Non-textEntry interactions: route by kind first.
+    # Variant metadata is harmless here (only affects display, not correctness).
 
     # Single-choice multiple-choice
     if kinds == ["choice"]:
@@ -138,6 +118,46 @@ def classify(item: AssessmentItem) -> Classification:
     if kinds == ["match"]:
         return Classification("matching", "matchInteraction", "medium", True)
 
+    # ----- textEntry interactions: variant metadata matters because the
+    # teacher answer is randomised, and a static AlgEquiv won't capture it.
+
+    if kinds and all(k == "textEntry" for k in kinds):
+        if _has_variant_metadata(item):
+            return Classification(
+                "manual",
+                "uses ONYX template variants (printedVariable / $(N) reference) — needs manual rewrite",
+                "high", False,
+            )
+        # Distinguish maxima-formula style from plain string
+        is_maxima_style = any(
+            "maxima" in (i.css_class or "").lower() for i in item.interactions
+        ) or has_maxima
+        if is_maxima_style:
+            # Any template binding using customOperator MAXIMA (instead of
+            # VARIABLESTRING) is treated as complex randomisation and deferred.
+            complex_template = any(
+                b.custom_op == "MAXIMA" for b in item.template_bindings
+            )
+            if complex_template:
+                return Classification(
+                    "manual",
+                    "STACK with Maxima-script template processing (deferred)",
+                    "medium", False,
+                )
+            return Classification(
+                "stack",
+                f"textEntry x{len(kinds)} with MAXIMA grading"
+                + (f" + {len(item.template_bindings)} template bindings" if has_template else ""),
+                "high", True,
+            )
+        return Classification(
+            "shortanswer",
+            f"textEntry x{len(kinds)}, plain string mapping",
+            "high", True,
+        )
+
+    # ----- Everything else
+
     if "hottext" in kinds:
         return Classification(
             "manual",
@@ -145,7 +165,6 @@ def classify(item: AssessmentItem) -> Classification:
             "low", False,
         )
 
-    # Mixed-interaction items (textEntry + choice + ...) — too custom for mechanical conversion
     if len(set(kinds)) > 1:
         return Classification(
             "manual",
