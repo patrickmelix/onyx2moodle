@@ -23,9 +23,6 @@ Two complementary checks live here:
    - `<answertest>String</answertest>` paired with a non-empty
      `<testoptions>` — STACK's String test has no case-insensitive option
      and ignores testoptions, so this is dead config that misleads readers.
-
-   See `~/.claude/projects/-workspace/memory/reference_stack_maxima_sandbox.md`
-   for the full sandbox reference.
 """
 from __future__ import annotations
 
@@ -53,7 +50,8 @@ _STRING_TEST_WITH_TESTOPTIONS_RE = re.compile(
 
 # Combinatorics functions NOT auto-loaded by stackmaxima.mac. If a STACK
 # question calls these bare names, it fails at Moodle import. The fix is
-# to inline them under a `stk_` prefix — see `feedback_stack_stk_prefix.md`.
+# to inline equivalent definitions under a non-built-in name (e.g. an
+# `stk_` prefix) so STACK's "no redefining built-ins" rule doesn't fire.
 _COMBINATORICS_BARE_NAMES = (
     "perm_cycles",
     "permult",
@@ -134,24 +132,15 @@ def _scan_questionvariables(qvars_text: str, qname: str) -> list[LintFinding]:
                 question_name=qname, rule="forbidden-load", line=idx, snippet=snippet,
                 message="`load(...)` is forbidden in STACK question scope.",
             ))
-        # --- forbidden random(...)  (random_permutation is OK; distinguish)
-        for m in _BARE_RANDOM_RE.finditer(line):
-            # Skip random_permutation, random_subset, random_subset_n, etc.
-            tail = line[m.end():]
-            # `random` is followed by `(` per the regex; check what *precedes*
-            # the open-paren region for the `_<suffix>` pattern.
-            head = line[m.start():m.end()]
-            if head.rstrip("(").rstrip().endswith("random"):
-                # Now check if it's actually `random_*` by inspecting the source
-                # line directly with a stricter pattern.
-                if re.search(r'(?<![_a-zA-Z])random\s*\(', line) and not re.search(
-                    r'(?<![_a-zA-Z])random_[a-zA-Z_]+\s*\(', line
-                ):
-                    findings.append(LintFinding(
-                        question_name=qname, rule="forbidden-random", line=idx, snippet=snippet,
-                        message="`random(...)` is forbidden; STACK uses `rand(...)` for random integers.",
-                    ))
-                    break
+        # --- forbidden random(...)
+        # `_BARE_RANDOM_RE` already requires `random` to be followed by `\s*\(`,
+        # so `random_permutation(`, `random_subset(`, etc. don't match (the
+        # next char after `random` is `_`). One finding per line is enough.
+        if _BARE_RANDOM_RE.search(line):
+            findings.append(LintFinding(
+                question_name=qname, rule="forbidden-random", line=idx, snippet=snippet,
+                message="`random(...)` is forbidden; STACK uses `rand(...)` for random integers.",
+            ))
         # --- bare combinatorics calls (not stk_-prefixed)
         for name in _COMBINATORICS_BARE_NAMES:
             if _bare_combinatorics_re(name).search(line):
@@ -159,8 +148,8 @@ def _scan_questionvariables(qvars_text: str, qname: str) -> list[LintFinding]:
                     question_name=qname, rule="unloaded-combinatorics", line=idx, snippet=snippet,
                     message=(
                         f"`{name}(...)` calls a function from the combinatorics package, "
-                        f"which is NOT loaded by stackmaxima.mac. Inline it under a `stk_` prefix "
-                        f"(e.g. `stk_{name}`). See feedback_stack_stk_prefix.md."
+                        f"which is NOT loaded by stackmaxima.mac. Inline it under a "
+                        f"non-built-in name (e.g. `stk_{name}`) and call that instead."
                     ),
                 ))
     return findings

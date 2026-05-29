@@ -70,6 +70,19 @@ def test_lint_allows_random_permutation_and_other_random_underscore(tmp_path: Pa
     assert report.ok, f"false positives: {report.summary()}"
 
 
+def test_lint_flags_random_even_when_random_underscore_present_on_same_line(tmp_path: Path) -> None:
+    """Regression: a line containing both `random(...)` AND `random_permutation(...)`
+    must still flag the forbidden bare call. An earlier implementation suppressed
+    the finding because a line-level guard looked for `random_<x>(` anywhere on
+    the line and treated that as a global escape hatch."""
+    f = tmp_path / "q.xml"
+    f.write_text(_shell(
+        'x : random(10); P : random_permutation(makelist(i, i, 1, 5));'
+    ))
+    report = lint_stack_maxima(f)
+    assert any(x.rule == "forbidden-random" for x in report.findings), report.summary()
+
+
 def test_lint_flags_bare_combinatorics_calls(tmp_path: Path) -> None:
     f = tmp_path / "q.xml"
     f.write_text(_shell(
