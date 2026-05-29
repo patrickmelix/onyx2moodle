@@ -1,0 +1,10 @@
+    <prt>
+      <name>%%PRT_NAME%%</name>
+      <value>%%PRT_VALUE%%</value>
+      <autosimplify>%%PRT_AUTOSIMPLIFY%%</autosimplify>
+      <feedbackstyle>1</feedbackstyle>
+      <feedbackvariables>
+        <text>%%PRT_FEEDBACKVARS%%</text>
+      </feedbackvariables>
+%%PRT_NODES%%
+    </prt>

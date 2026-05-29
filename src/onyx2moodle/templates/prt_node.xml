@@ -1,0 +1,25 @@
+      <node>
+        <name>%%NODE_NAME%%</name>
+        <description>%%NODE_DESCRIPTION%%</description>
+        <answertest>%%NODE_ANSWERTEST%%</answertest>
+        <sans>%%NODE_SANS%%</sans>
+        <tans>%%NODE_TANS%%</tans>
+        <testoptions>%%NODE_TESTOPTIONS%%</testoptions>
+        <quiet>%%NODE_QUIET%%</quiet>
+        <truescoremode>=</truescoremode>
+        <truescore>%%NODE_TRUE_SCORE%%</truescore>
+        %%NODE_TRUE_PENALTY%%
+        <truenextnode>%%NODE_TRUE_NEXTNODE%%</truenextnode>
+        <trueanswernote>%%NODE_TRUE_ANSWERNOTE%%</trueanswernote>
+        <truefeedback format="html">
+          <text><![CDATA[%%NODE_TRUE_FEEDBACK%%]]></text>
+        </truefeedback>
+        <falsescoremode>=</falsescoremode>
+        <falsescore>%%NODE_FALSE_SCORE%%</falsescore>
+        %%NODE_FALSE_PENALTY%%
+        <falsenextnode>%%NODE_FALSE_NEXTNODE%%</falsenextnode>
+        <falseanswernote>%%NODE_FALSE_ANSWERNOTE%%</falseanswernote>
+        <falsefeedback format="html">
+          <text><![CDATA[%%NODE_FALSE_FEEDBACK%%]]></text>
+        </falsefeedback>
+      </node>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<quiz>
+<question type="stack">
+    <name>
+      <text>%%QUESTION_NAME%%</text>
+    </name>
+    <questiontext format="html">
+      <text><![CDATA[%%QUESTION_HTML%%]]></text>
+    </questiontext>
+    <generalfeedback format="html">
+      <text><![CDATA[%%GENERAL_FEEDBACK%%]]></text>
+    </generalfeedback>
+    <defaultgrade>%%DEFAULT_GRADE%%</defaultgrade>
+    <penalty>0.1000000</penalty>
+    <hidden>0</hidden>
+    <idnumber/>
+    <stackversion>
+      <text>%%STACK_VERSION%%</text>
+    </stackversion>
+    <questionvariables>
+      <text>%%QUESTION_VARIABLES%%</text>
+    </questionvariables>
+    <specificfeedback format="html">
+      <text><![CDATA[%%SPECIFIC_FEEDBACK%%]]></text>
+    </specificfeedback>
+    <questionnote>
+      <text>%%QUESTION_NOTE%%</text>
+    </questionnote>
+    <questiondescription format="moodle_auto_format">
+      <text/>
+    </questiondescription>
+    <questionsimplify>%%QUESTION_SIMPLIFY%%</questionsimplify>
+    <assumepositive>%%ASSUME_POSITIVE%%</assumepositive>
+    <assumereal>%%ASSUME_REAL%%</assumereal>
+    <prtcorrect format="html">
+      <text><![CDATA[%%PRT_CORRECT_HTML%%]]></text>
+    </prtcorrect>
+    <prtpartiallycorrect format="html">
+      <text><![CDATA[%%PRT_PARTIALLY_CORRECT_HTML%%]]></text>
+    </prtpartiallycorrect>
+    <prtincorrect format="html">
+      <text><![CDATA[%%PRT_INCORRECT_HTML%%]]></text>
+    </prtincorrect>
+    <decimals>.</decimals>
+    <multiplicationsign>dot</multiplicationsign>
+    <sqrtsign>1</sqrtsign>
+    <complexno>i</complexno>
+    <inversetrig>cos-1</inversetrig>
+    <logicsymbol>lang</logicsymbol>
+    <matrixparens>(</matrixparens>
+    <variantsselectionseed/>
+%%INPUTS_BLOCK%%
+%%PRT_WRAPPERS_BLOCK%%
+%%QTESTS_BLOCK%%
+    <tags>
+%%TAGS_BLOCK%%
+    </tags>
+  </question>
+</quiz>

@@ -1,0 +1,6 @@
+    <qtest>
+      <testcase>%%QTEST_NUMBER%%</testcase>
+      <description>%%QTEST_DESCRIPTION%%</description>
+%%QTEST_INPUTS%%
+%%QTEST_EXPECTED%%
+    </qtest>
