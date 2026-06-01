@@ -272,6 +272,132 @@ def _strip_orphan_printedvariables(html: str, skipped_idents: set[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Combinatorics-package helpers (inlined under stk_* prefix)
+#
+# STACK's `stackmaxima.mac` does NOT load the `combinatorics` package, so
+# calls to bare names like `perm_cycles`, `permult`, etc. error at runtime
+# with "Verbotene Funktion: ...". STACK also forbids redefining built-ins,
+# so we can't just `perm_cycles(P) := ...` either. The defensive fix
+# documented in workspace memory is: define helpers under a `stk_` prefix
+# and rewrite all call sites in the same question.
+#
+# Helpers below cover every name listed in qa.py:_COMBINATORICS_BARE_NAMES.
+# A helper is only prepended to a question's questionvariables when that
+# question actually references the bare name.
+# ---------------------------------------------------------------------------
+
+
+_STK_HELPER_BANNER = (
+    "/* Combinatorics-Paket ist in STACK nicht geladen; "
+    "Helfer mit stk_-Prefix */"
+)
+
+
+_STK_HELPERS: dict[str, str] = {
+    # Cycle decomposition (1-cycles / fixed points dropped, matching Maxima's
+    # standard `perm_cycles` output).
+    "perm_cycles": (
+        "stk_perm_cycles(P) := block([n : length(P), unvisited, cycles : [], i, j, cyc],\n"
+        "  unvisited : setify(makelist(k, k, 1, n)),\n"
+        "  for i : 1 thru n do (\n"
+        "    if elementp(i, unvisited) then (\n"
+        "      j : i, cyc : [],\n"
+        "      while elementp(j, unvisited) do (\n"
+        "        cyc : endcons(j, cyc),\n"
+        "        unvisited : disjoin(j, unvisited),\n"
+        "        j : P[j]\n"
+        "      ),\n"
+        "      if length(cyc) > 1 then cycles : endcons(cyc, cycles)\n"
+        "    )\n"
+        "  ),\n"
+        "  cycles\n"
+        ")"
+    ),
+    # Variadic composition. permult(P, Q, ...) — apply P first, then Q, ...
+    # so that (permult(P, Q))[i] = Q[P[i]].
+    "permult": (
+        "stk_permult([args]) := lreduce("
+        "lambda([acc, Q], makelist(Q[acc[i]], i, 1, length(acc))), args)"
+    ),
+    # Sign of permutation via inversion count.
+    "perm_parity": (
+        "stk_perm_parity(P) := block([n : length(P), inv : 0, i, j],\n"
+        "  for i : 1 thru n - 1 do\n"
+        "    for j : i + 1 thru n do\n"
+        "      if P[i] > P[j] then inv : inv + 1,\n"
+        "  if mod(inv, 2) = 0 then 1 else -1\n"
+        ")"
+    ),
+    # Inverse permutation.
+    "inv_perm": (
+        "stk_inv_perm(P) := block([n : length(P), result, i],\n"
+        "  result : makelist(0, i, 1, n),\n"
+        "  for i : 1 thru n do result[P[i]] : i,\n"
+        "  result\n"
+        ")"
+    ),
+    # Decompose a permutation into a product of transpositions. Returns a
+    # list of two-element lists [a, b]. Empty list for identity.
+    "perm_decomp": (
+        "stk_perm_decomp(P) := block([n : length(P), Q, result : [], i, j],\n"
+        "  Q : copylist(P),\n"
+        "  for i : 1 thru n do (\n"
+        "    if Q[i] # i then (\n"
+        "      j : i + 1,\n"
+        "      while j <= n and Q[j] # i do j : j + 1,\n"
+        "      if j <= n then (\n"
+        "        result : endcons([i, j], result),\n"
+        "        [Q[i], Q[j]] : [Q[j], Q[i]]\n"
+        "      )\n"
+        "    )\n"
+        "  ),\n"
+        "  result\n"
+        ")"
+    ),
+    # permp(P, n): true iff P is a permutation of {1, ..., n}.
+    "permp": (
+        "stk_permp(P, n) := is(sort(P) = makelist(i, i, 1, n))"
+    ),
+}
+
+
+# Match a bare call `<name>(` not already preceded by `stk_` (or other word
+# chars that would form a different identifier).
+_BARE_COMBINATORICS = re.compile(
+    r"(?<![A-Za-z0-9_])(" + "|".join(_STK_HELPERS.keys()) + r")\s*\("
+)
+
+
+def _rewrite_combinatorics_helpers(maxima_block: str) -> tuple[str, list[str]]:
+    """Return (rewritten_block, prepended_defs).
+
+    For each combinatorics function that appears as a bare call in
+    `maxima_block`, prefix the call site with `stk_` and emit the
+    corresponding helper definition. The caller prepends `prepended_defs`
+    to the questionvariables block; an empty list means no rewrite was
+    needed.
+
+    Calls already prefixed `stk_<name>(` are NOT matched (the negative
+    lookbehind on `[A-Za-z0-9_]` rules them out), so this is idempotent.
+    """
+    used: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        name = m.group(1)
+        if name not in used:
+            used.append(name)
+        return "stk_" + name + "("
+
+    new_block = _BARE_COMBINATORICS.sub(repl, maxima_block)
+    if not used:
+        return maxima_block, []
+    defs = [_STK_HELPER_BANNER]
+    for name in used:
+        defs.append(_STK_HELPERS[name] + ";")
+    return new_block, defs
+
+
+# ---------------------------------------------------------------------------
 # Static-answer helpers (existing behaviour for non-template items)
 # ---------------------------------------------------------------------------
 
@@ -495,6 +621,14 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
     qv_lines: list[str] = [f"{line};" for line in template_lines]
     qv_lines.extend(f"{s.tans_var} : {s.tans_expr};" for s in specs)
     questionvariables = "\n".join(qv_lines)
+
+    # If the questionvariables block calls combinatorics-package functions
+    # by their bare names (`perm_cycles`, `permult`, ...) — which STACK's
+    # sandbox forbids — rewrite call sites to `stk_*` and prepend the
+    # helper definitions. No-op when no bare call is present.
+    questionvariables, helper_defs = _rewrite_combinatorics_helpers(questionvariables)
+    if helper_defs:
+        questionvariables = "\n".join(helper_defs) + "\n\n" + questionvariables
 
     # questiontext: replace each textEntry by [[input:ansN]] [[validation:ansN]]
     replacements = {
