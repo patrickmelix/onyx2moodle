@@ -19,7 +19,9 @@ Two shapes are handled:
 
 `MAXIMAGRAPHIC` template variables (auto-generated PNG plots tied to the
 random vars) have no STACK equivalent — those variables are skipped, and
-any printedVariable referencing them is stripped from the body.
+any printedVariable referencing them is replaced in the body with a
+visible German placeholder noting that the graphic is unavailable in
+this Phase-1 conversion (see `_rewrite_printedvariables`).
 
 Produces a mechanical, *correct* 1-node PRT per response: a single
 `AlgEquiv(ans, tans)` test. No diagnostic-misconception branches and no
@@ -557,7 +559,7 @@ def _render_tags(category_path: list[str], extra_tags: list[str] = None) -> str:
     TE:2 / TE:3 if available, plus any `extra_tags` (free-form strings)
     such as `needs-manual-answer` for items whose OPAL source has empty
     correctResponse blocks."""
-    parts = [p.strip().replace("'", "'") for p in (category_path or []) if p.strip()]
+    parts = [_escape_text(p.strip()) for p in (category_path or []) if p.strip()]
     lines: list[str] = []
     if len(parts) >= 1:
         lines.append(f"      <tag><text>TE:1:{parts[0]}</text></tag>")
@@ -598,10 +600,11 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
 
     # Map RESPONSE_x -> teacher answer. Three-step priority:
     #   1) templateProcessing/setCorrectResponse (random or computed answer)
-    #   2) responseDeclaration.correctValues
-    #   3) static templateBinding payload (the `value` of a VARIABLESTRING
+    #   2) static templateBinding payload (the `value` of a VARIABLESTRING
     #      setCorrectResponse — same source as #1 for non-template items,
     #      kept for backwards compat with the pre-template parser path)
+    #   3) responseDeclaration.correctValues (backfill when neither
+    #      template-driven path produced an answer)
     template_tans_by_rid: dict[str, str] = {}
     for ix in text_entries:
         expr = _teacher_answer_from_template(item, ix.response_identifier)
