@@ -294,6 +294,12 @@ _STK_HELPER_BANNER = (
 
 
 _STK_HELPERS: dict[str, str] = {
+    # Random permutation of {1, ..., n}. ONYX exposes `random_perm(n)` from
+    # the combinatorics package; Maxima base has `random_permutation(L)` which
+    # takes a list. Wrap it.
+    "random_perm": (
+        "stk_random_perm(n) := random_permutation(makelist(i, i, 1, n))"
+    ),
     # Cycle decomposition (1-cycles / fixed points dropped, matching Maxima's
     # standard `perm_cycles` output).
     "perm_cycles": (
