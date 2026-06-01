@@ -548,13 +548,16 @@ def _render_single_node_prt(spec: _StackInputSpec, max_score: float, true_html: 
     return wrap
 
 
-def _render_tags(category_path: list[str]) -> str:
+_MANUAL_ANSWER_TAG = "needs-manual-answer"
+
+
+def _render_tags(category_path: list[str], extra_tags: list[str] = None) -> str:
     """Emit at least one TE:1:<area> tag from the top of the category path
     (the validator warns if missing). Append the next two levels as
-    TE:2 / TE:3 if available."""
-    if not category_path:
-        return ""
-    parts = [p.strip().replace("'", "'") for p in category_path if p.strip()]
+    TE:2 / TE:3 if available, plus any `extra_tags` (free-form strings)
+    such as `needs-manual-answer` for items whose OPAL source has empty
+    correctResponse blocks."""
+    parts = [p.strip().replace("'", "'") for p in (category_path or []) if p.strip()]
     lines: list[str] = []
     if len(parts) >= 1:
         lines.append(f"      <tag><text>TE:1:{parts[0]}</text></tag>")
@@ -562,7 +565,13 @@ def _render_tags(category_path: list[str]) -> str:
         lines.append(f"      <tag><text>TE:2:{parts[1]}</text></tag>")
     if len(parts) >= 3:
         lines.append(f"      <tag><text>TE:3:{parts[2]}</text></tag>")
+    for tag in (extra_tags or []):
+        lines.append(f"      <tag><text>{_escape_text(tag)}</text></tag>")
     return "\n".join(lines)
+
+
+def _escape_text(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 # ---------------------------------------------------------------------------
@@ -622,10 +631,25 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
             )
         )
 
+    # Flag inputs whose teacher answer reduces to Maxima `null` — that
+    # happens when the OPAL source has an empty <setCorrectResponse value=""/>
+    # block ("manuelle Auswertung" in ONYX: the teacher graded manually).
+    # We can't synthesise a correct answer mechanically, but we tag the
+    # question so the teacher can filter for it and add the answer after
+    # import.
+    missing_answer_inputs = [s.name for s in specs if s.tans_expr.strip() == "null"]
+
     # questionvariables: first the template-variable assignments (random ints,
     # chained MAXIMA), then the teacher-answer assignments referencing them.
     qv_lines: list[str] = [f"{line};" for line in template_lines]
     qv_lines.extend(f"{s.tans_var} : {s.tans_expr};" for s in specs)
+    if missing_answer_inputs:
+        names = ", ".join(missing_answer_inputs)
+        qv_lines.append(
+            f"/* TODO manual-answer: OPAL source has empty <setCorrectResponse> "
+            f"for {names}; teacher must fill in the tans_* assignment(s) above "
+            f"before this question can grade. */"
+        )
     questionvariables = "\n".join(qv_lines)
 
     # If the questionvariables block calls combinatorics-package functions
@@ -698,7 +722,8 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
     out = substitute_raw(out, "INPUTS_BLOCK", inputs_block)
     out = substitute_raw(out, "PRT_WRAPPERS_BLOCK", prts_block)
     out = substitute_raw(out, "QTESTS_BLOCK", "")
-    out = substitute_raw(out, "TAGS_BLOCK", _render_tags(category_path))
+    extra_tags = [_MANUAL_ANSWER_TAG] if missing_answer_inputs else []
+    out = substitute_raw(out, "TAGS_BLOCK", _render_tags(category_path, extra_tags))
 
     # Strip the surrounding <?xml..?><quiz>...</quiz> envelope — we'll add
     # our own envelope when bundling many questions into one file.
