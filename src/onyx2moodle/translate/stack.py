@@ -1,11 +1,30 @@
 """ONYX (textEntryInteraction + MAXIMA grading) -> Moodle qtype_stack.
 
+Two shapes are handled:
+
+1. Static teacher answer (no templateProcessing or trivial VARIABLESTRING
+   binding): teacher answer is a Maxima literal pulled straight from
+   `responseDeclaration.correctValue` or a baseValue setCorrectResponse.
+
+2. Templated teacher answer (ONYX template-variant questions):
+   `<templateProcessing>` defines random integers, random list picks,
+   and chained Maxima expressions via `customOperator definition="MAXIMA"`.
+   We translate each `<setTemplateValue>` block into a Maxima statement
+   in STACK's `<questionvariables>` slot, with the `$(N)` indexed refs
+   substituted for the referenced template-variable names. The teacher
+   answer is then either a single variable reference (VARIABLESTRING +
+   `$(1)`) or a Maxima expression (MAXIMA + value with refs). The
+   `<printedVariable identifier="X"/>` placeholders in the body and
+   feedback already become `{@X@}` via `extract_question_html`.
+
+`MAXIMAGRAPHIC` template variables (auto-generated PNG plots tied to the
+random vars) have no STACK equivalent — those variables are skipped, and
+any printedVariable referencing them is stripped from the body.
+
 Produces a mechanical, *correct* 1-node PRT per response: a single
-`AlgEquiv(ans, tans)` test, the teacher answer pulled from
-`templateProcessing` (`VARIABLESTRING`) or `responseDeclaration`. No
-diagnostic-misconception branches and no qtests — those are out of scope
-for a mechanical converter and should be added by hand for individual
-high-value questions after import.
+`AlgEquiv(ans, tans)` test. No diagnostic-misconception branches and no
+qtests — those are out of scope for a mechanical converter and should be
+added by hand for individual high-value questions after import.
 
 The emitted XML imports cleanly into Moodle's `qtype_stack` plugin and
 parses against any external STACK structural validator (see `qa.py`).
@@ -15,7 +34,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ..parser import AssessmentItem, Interaction, ResponseDeclaration
+from lxml import etree
+
+from ..parser import NS, AssessmentItem, Interaction, ResponseDeclaration
 from ..render import load_template, substitute_cdata, substitute_escaped, substitute_raw
 from .common import (
     embed_images_as_base64,
@@ -32,6 +53,227 @@ STACK_VERSION = "2024111900"   # matches the skill's lhopital example
 
 
 _ONYX_SET_RE = re.compile(r"^set\((.*)\)$", flags=re.DOTALL)
+
+
+# ---------------------------------------------------------------------------
+# ONYX templateProcessing -> STACK questionvariables
+# ---------------------------------------------------------------------------
+
+
+_DOLLAR_REF = re.compile(r"\$\((\d+)\)")
+_RANDOM_CALL = re.compile(r"\brandom\s*\(")
+_LOAD_STATEMENT = re.compile(r"\bload\s*\([^)]*\)\s*[,;]?")
+
+
+def _substitute_indexed_refs(expr: str, refs: list[str]) -> str:
+    """In a Maxima value string, replace `$(N)` with the Nth referenced
+    variable identifier. ONYX's QTI uses 1-based indices."""
+
+    def repl(m: re.Match) -> str:
+        idx = int(m.group(1)) - 1
+        if 0 <= idx < len(refs):
+            return refs[idx]
+        return m.group(0)  # leave unsubstituted if out of range
+
+    return _DOLLAR_REF.sub(repl, expr)
+
+
+def _normalise_onyx_maxima(expr: str) -> str:
+    """Rewrite ONYX-Maxima idioms that STACK's sandbox rejects.
+
+    - `random(N)` -> `rand(N)`. ONYX exposes Maxima's `random(...)`; STACK
+      forbids the bare name and exposes `rand(...)` instead (range semantics
+      are identical for integer N: `[0, N)`).
+    - `load("draw")` / `load("...")` -> stripped. STACK pre-loads everything
+      it allows via `stackmaxima.mac`; calling `load(...)` errors with
+      "Verbotene Funktion: load.". The wrapping `block(load(...), expr)` is
+      preserved as-is; only the load call itself is removed.
+
+    These transformations apply to ALL ONYX MAXIMA value strings (template
+    assignments and setCorrectResponse expressions alike) so the resulting
+    questionvariables block passes STACK's runtime lint.
+    """
+    expr = _RANDOM_CALL.sub("rand(", expr)
+    expr = _LOAD_STATEMENT.sub("", expr)
+    return expr
+
+
+def _template_processing_to_maxima(
+    item: AssessmentItem,
+) -> tuple[list[str], set[str]]:
+    """Walk `<templateProcessing>/<setTemplateValue>` and emit Maxima
+    assignments suitable for STACK's `<questionvariables>` block.
+
+    Returns `(maxima_lines, skipped_idents)`:
+      - `maxima_lines`: list of `<ident>: <expr>` statements WITHOUT trailing
+        semicolons (the caller appends `;`).
+      - `skipped_idents`: identifiers whose source operator we couldn't
+        translate (MAXIMAGRAPHIC, unknown random shape).
+
+    Empty list + empty set means the item has no templateProcessing at all.
+    """
+    try:
+        root = etree.fromstring(item.raw_xml)
+    except etree.XMLSyntaxError:
+        return [], set()
+    tp = root.find("q:templateProcessing", NS)
+    if tp is None:
+        return [], set()
+
+    lines: list[str] = []
+    skipped: set[str] = set()
+
+    for stv in tp.findall("q:setTemplateValue", NS):
+        ident = stv.get("identifier")
+        if not ident:
+            continue
+        children = list(stv)
+        if not children:
+            continue
+        child = children[0]
+        tag = etree.QName(child).localname
+
+        if tag == "randomInteger":
+            lo = child.get("min", "0")
+            hi = child.get("max", "0")
+            lines.append(f"{ident}: rand_with_step({lo}, {hi}, 1)")
+            continue
+
+        if tag == "randomFloat":
+            lo = child.get("min", "0")
+            hi = child.get("max", "1")
+            # STACK's rand() on a float returns [0, x); approximate uniform [lo, hi].
+            lines.append(f"{ident}: float({lo} + rand(1.0)*(({hi})-({lo})))")
+            continue
+
+        if tag == "random":
+            mult = child.find("q:multiple", NS)
+            if mult is None:
+                skipped.add(ident)
+                continue
+            vals = []
+            for bv in mult.findall("q:baseValue", NS):
+                t = (bv.text or "").strip()
+                if t:
+                    vals.append(t)
+            if not vals:
+                skipped.add(ident)
+                continue
+            lines.append(f"{ident}: rand([{','.join(vals)}])")
+            continue
+
+        if tag == "customOperator":
+            definition = child.get("definition")
+            value = (child.get("value") or "").strip()
+            refs = [v.get("identifier") for v in child.findall("q:variable", NS) if v.get("identifier")]
+            if definition == "MAXIMAGRAPHIC":
+                skipped.add(ident)
+                continue
+            if definition == "MAXIMA":
+                expr = _substitute_indexed_refs(value, refs)
+                expr = _normalise_onyx_maxima(expr)
+                expr = expr.rstrip(";").strip()
+                if expr:
+                    lines.append(f"{ident}: {expr}")
+                else:
+                    skipped.add(ident)
+                continue
+            # Unknown customOperator definition: skip.
+            skipped.add(ident)
+            continue
+
+        # Some other QTI element we don't understand.
+        skipped.add(ident)
+
+    return lines, skipped
+
+
+def _teacher_answer_from_template(
+    item: AssessmentItem, response_identifier: str
+) -> str | None:
+    """Return the Maxima expression (or variable name) that the teacher
+    answer should evaluate to for response `response_identifier`, derived
+    from the corresponding `<setCorrectResponse>` block. Returns None if
+    no template-based teacher answer is defined.
+    """
+    try:
+        root = etree.fromstring(item.raw_xml)
+    except etree.XMLSyntaxError:
+        return None
+    tp = root.find("q:templateProcessing", NS)
+    if tp is None:
+        return None
+    for scr in tp.findall("q:setCorrectResponse", NS):
+        if scr.get("identifier") != response_identifier:
+            continue
+        co = scr.find("q:customOperator", NS)
+        if co is None:
+            bv = scr.find("q:baseValue", NS)
+            if bv is not None and bv.text:
+                return bv.text.strip()
+            return None
+        definition = co.get("definition")
+        value = (co.get("value") or "").strip()
+        refs = [v.get("identifier") for v in co.findall("q:variable", NS) if v.get("identifier")]
+        if definition == "VARIABLESTRING":
+            # Only claim the template-derived path when the value actually
+            # references a template variable. Pure-literal VARIABLESTRING
+            # values (e.g. `set(1,3,5,7)` from non-random items) belong to
+            # the static path so `_onyx_value_to_maxima` can rewrite ONYX
+            # literals into Maxima.
+            if not refs and "$(" not in value:
+                return None
+            if value == "$(1)" and len(refs) == 1:
+                return refs[0]
+            return _normalise_onyx_maxima(_substitute_indexed_refs(value, refs))
+        if definition == "MAXIMA":
+            expr = _substitute_indexed_refs(value, refs)
+            expr = _normalise_onyx_maxima(expr)
+            return expr.rstrip(";").strip()
+        return None
+    return None
+
+
+_PRINTED_VARIABLE_TAG = re.compile(
+    r'<printedVariable\b[^>]*\bidentifier="([^"]+)"[^>]*/>'
+)
+
+
+def _rewrite_printedvariables(html: str, skipped_idents: set[str]) -> str:
+    """Convert any remaining `<printedVariable identifier="X"/>` tags to
+    STACK `{@X@}` interpolation, and replace references to skipped (eg
+    MAXIMAGRAPHIC) variables with a small placeholder so the rendered
+    question still reads correctly.
+
+    `extract_question_html` already does this for the question body, but
+    feedback HTML pulled out of `<modalFeedback>` goes through a different
+    path — apply the same rule here.
+    """
+    def repl(m: re.Match) -> str:
+        ident = m.group(1)
+        if ident in skipped_idents:
+            return "<em>[Grafik in dieser Phase-1-Konvertierung nicht verfügbar]</em>"
+        return "{@" + ident + "@}"
+
+    html = _PRINTED_VARIABLE_TAG.sub(repl, html)
+    # Also catch already-rewritten `{@ident@}` for skipped variables (the body
+    # extractor may have run first).
+    for ident in skipped_idents:
+        html = html.replace(
+            "{@" + ident + "@}",
+            "<em>[Grafik in dieser Phase-1-Konvertierung nicht verfügbar]</em>",
+        )
+    return html
+
+
+def _strip_orphan_printedvariables(html: str, skipped_idents: set[str]) -> str:
+    """Back-compat alias for the more general `_rewrite_printedvariables`."""
+    return _rewrite_printedvariables(html, skipped_idents)
+
+
+# ---------------------------------------------------------------------------
+# Static-answer helpers (existing behaviour for non-template items)
+# ---------------------------------------------------------------------------
 
 
 def _onyx_value_to_maxima(value: str) -> str:
@@ -67,6 +309,7 @@ class _StackInputSpec:
     forbidfloat: int        # 1 if exact answer expected, 0 otherwise
     syntaxhint: str
     answertest: str         # "AlgEquiv" | "EqualComAss" | "NumAbsolute"
+    from_template: bool = False   # True if tans_expr came from templateProcessing
 
 
 def _input_spec_for(
@@ -74,20 +317,34 @@ def _input_spec_for(
     interaction: Interaction,
     rdecl: ResponseDeclaration | None,
     teacher_answer: str | None,
+    *,
+    template_teacher_expr: str | None = None,
 ) -> _StackInputSpec:
     name = f"ans{idx}"
     tans_var = f"tans_{name}"
-    tans_expr = _onyx_value_to_maxima(teacher_answer or "")
+
+    # Template-derived teacher answer wins over the static fallback when
+    # available. Note: for template-derived expressions we do NOT run
+    # `_onyx_value_to_maxima` — that helper rewrites ONYX `set(...)`
+    # literals, which don't occur in templateProcessing output.
+    if template_teacher_expr is not None:
+        tans_expr = template_teacher_expr
+        from_template = True
+    else:
+        tans_expr = _onyx_value_to_maxima(teacher_answer or "")
+        from_template = False
 
     # Default to algebraic; if the teacher answer is a pure number AND the
     # response declaration is float, use NumAbsolute and forbid float-rounding
-    # surprises.
-    is_pure_number = bool(re.fullmatch(r"-?\d+(\.\d+)?", tans_expr))
+    # surprises. Template-derived answers stay AlgEquiv even when they happen
+    # to evaluate to a number for one variant — the type isn't stable.
     answertest = "AlgEquiv"
     forbidfloat = 1
-    if is_pure_number and rdecl and rdecl.base_type == "float":
-        answertest = "NumAbsolute"
-        forbidfloat = 0
+    if not from_template:
+        is_pure_number = bool(re.fullmatch(r"-?\d+(\.\d+)?", tans_expr))
+        if is_pure_number and rdecl and rdecl.base_type == "float":
+            answertest = "NumAbsolute"
+            forbidfloat = 0
     # Sets / lists pass through with AlgEquiv — STACK handles `{...}` and `[...]` equality.
 
     boxsize = max(8, (interaction.expected_length or 15))
@@ -102,6 +359,7 @@ def _input_spec_for(
         forbidfloat=forbidfloat,
         syntaxhint=syntaxhint,
         answertest=answertest,
+        from_template=from_template,
     )
 
 
@@ -191,27 +449,51 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
     if not text_entries:
         raise ValueError("STACK translator requires at least one textEntryInteraction")
 
-    # Map RESPONSE_x -> teacher answer (from templateBinding if present,
-    # else from responseDeclaration.correctResponse).
-    tans_by_rid: dict[str, str] = {}
+    # ONYX templateProcessing -> Maxima questionvariables (random integers,
+    # list-pick, chained MAXIMA expressions). MAXIMAGRAPHIC entries are
+    # skipped and any printedVariable referencing them gets a placeholder
+    # in the rendered body.
+    template_lines, skipped_idents = _template_processing_to_maxima(item)
+
+    # Map RESPONSE_x -> teacher answer. Three-step priority:
+    #   1) templateProcessing/setCorrectResponse (random or computed answer)
+    #   2) responseDeclaration.correctValues
+    #   3) static templateBinding payload (the `value` of a VARIABLESTRING
+    #      setCorrectResponse — same source as #1 for non-template items,
+    #      kept for backwards compat with the pre-template parser path)
+    template_tans_by_rid: dict[str, str] = {}
+    for ix in text_entries:
+        expr = _teacher_answer_from_template(item, ix.response_identifier)
+        if expr is not None:
+            template_tans_by_rid[ix.response_identifier] = expr
+
+    static_tans_by_rid: dict[str, str] = {}
     for tb in item.template_bindings:
         if tb.custom_op == "VARIABLESTRING" and tb.value is not None:
-            tans_by_rid[tb.response_identifier] = tb.value
+            static_tans_by_rid[tb.response_identifier] = tb.value
     for rid, rd in item.response_decls.items():
-        if rid in tans_by_rid:
+        if rid in static_tans_by_rid:
             continue
         if rd.correct_values:
-            tans_by_rid[rid] = rd.correct_values[0]
+            static_tans_by_rid[rid] = rd.correct_values[0]
 
     # Build per-input specs
     specs: list[_StackInputSpec] = []
     for idx, ix in enumerate(text_entries, start=1):
         rdecl = item.response_decls.get(ix.response_identifier)
-        teacher = tans_by_rid.get(ix.response_identifier)
-        specs.append(_input_spec_for(idx, ix, rdecl, teacher))
+        template_expr = template_tans_by_rid.get(ix.response_identifier)
+        fallback = static_tans_by_rid.get(ix.response_identifier)
+        specs.append(
+            _input_spec_for(
+                idx, ix, rdecl, fallback,
+                template_teacher_expr=template_expr,
+            )
+        )
 
-    # questionvariables: tans_ansN : <maxima_literal>;
-    qv_lines = [f"{s.tans_var} : {s.tans_expr};" for s in specs]
+    # questionvariables: first the template-variable assignments (random ints,
+    # chained MAXIMA), then the teacher-answer assignments referencing them.
+    qv_lines: list[str] = [f"{line};" for line in template_lines]
+    qv_lines.extend(f"{s.tans_var} : {s.tans_expr};" for s in specs)
     questionvariables = "\n".join(qv_lines)
 
     # questiontext: replace each textEntry by [[input:ansN]] [[validation:ansN]]
@@ -220,10 +502,13 @@ def translate(item: AssessmentItem, assets: list = None, category_path: list[str
         for ix, spec in zip(text_entries, specs, strict=True)
     }
     body_html = extract_question_html(item, replacements)
+    body_html = _strip_orphan_printedvariables(body_html, skipped_idents)
     body_html, image_files = embed_images_as_base64(body_html, assets)
 
     # Feedback bodies
     correct_fb_html, incorrect_fb_html = _split_feedback(item)
+    correct_fb_html = _strip_orphan_printedvariables(correct_fb_html, skipped_idents)
+    incorrect_fb_html = _strip_orphan_printedvariables(incorrect_fb_html, skipped_idents)
     # general feedback = the worked solution where ONYX provided one
     general_feedback = correct_fb_html or "<p></p>"
 

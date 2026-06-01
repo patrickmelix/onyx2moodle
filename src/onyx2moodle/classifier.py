@@ -122,33 +122,45 @@ def classify(item: AssessmentItem) -> Classification:
     # teacher answer is randomised, and a static AlgEquiv won't capture it.
 
     if kinds and all(k == "textEntry" for k in kinds):
-        if _has_variant_metadata(item):
-            return Classification(
-                "manual",
-                "uses ONYX template variants (printedVariable / $(N) reference) — needs manual rewrite",
-                "high", False,
-            )
-        # Distinguish maxima-formula style from plain string
         is_maxima_style = any(
             "maxima" in (i.css_class or "").lower() for i in item.interactions
         ) or has_maxima
         if is_maxima_style:
-            # Any template binding using customOperator MAXIMA (instead of
-            # VARIABLESTRING) is treated as complex randomisation and deferred.
-            complex_template = any(
-                b.custom_op == "MAXIMA" for b in item.template_bindings
-            )
-            if complex_template:
+            # ONYX template-variant questions: <templateProcessing> defines
+            # random integers / random list picks / chained MAXIMA expressions,
+            # and the teacher answer references one or more template vars
+            # (VARIABLESTRING `$(1)` or a MAXIMA computation). The stack
+            # translator emits these as STACK <questionvariables>.
+            #
+            # Items whose templateProcessing relies critically on
+            # MAXIMAGRAPHIC are still translatable — that variable is skipped
+            # and any printedVariable referencing it gets a placeholder.
+            if has_template or _has_variant_metadata(item):
+                summary_parts = []
+                if has_template:
+                    summary_parts.append("templateProcessing")
+                if item.template_bindings:
+                    summary_parts.append(f"{len(item.template_bindings)} bindings")
                 return Classification(
-                    "manual",
-                    "STACK with Maxima-script template processing (deferred)",
-                    "medium", False,
+                    "stack",
+                    f"textEntry x{len(kinds)} with MAXIMA grading + "
+                    + ", ".join(summary_parts or ["template variants"]),
+                    "high", True,
                 )
             return Classification(
                 "stack",
-                f"textEntry x{len(kinds)} with MAXIMA grading"
-                + (f" + {len(item.template_bindings)} template bindings" if has_template else ""),
+                f"textEntry x{len(kinds)} with MAXIMA grading",
                 "high", True,
+            )
+        if _has_variant_metadata(item):
+            # Plain-string textEntry with template variants: shortanswer has
+            # no randomisation, so still defer. (Could be lifted later: emit
+            # a STACK string-input question with rand(["A","B"]).)
+            return Classification(
+                "manual",
+                "uses ONYX template variants on a non-Maxima textEntry "
+                "— needs manual rewrite",
+                "high", False,
             )
         return Classification(
             "shortanswer",

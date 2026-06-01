@@ -44,13 +44,18 @@ def test_classify_simple_stack_targets_stack(tmp_path: Path) -> None:
     assert cls.convertible is True
 
 
-def test_classify_variant_defers_to_manual(tmp_path: Path) -> None:
+def test_classify_variant_routes_to_stack(tmp_path: Path) -> None:
+    """ONYX template-variant textEntry+Maxima items now translate into a
+    STACK question with random-variable questionvariables, rather than
+    being deferred. The translator handles VARIABLESTRING `$(N)` and
+    MAXIMA-script setCorrectResponse blocks; MAXIMAGRAPHIC template vars
+    are dropped with a placeholder."""
     p = tmp_path / "i.xml"
     p.write_text(PRINTED_VAR_ITEM)
     cls = classify(parse_item(p))
-    assert cls.target == "manual"
-    assert cls.convertible is False
-    assert "template variants" in cls.reason or "printedVariable" in cls.reason
+    assert cls.target == "stack"
+    assert cls.convertible is True
+    assert "templateProcessing" in cls.reason or "bindings" in cls.reason
 
 
 # Variant metadata co-existing with a non-textEntry interaction (matchInteraction
